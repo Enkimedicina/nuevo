@@ -5,6 +5,7 @@ import { DebtManager } from './components/DebtManager';
 import { BudgetManager } from './components/BudgetManager';
 import { ProjectionTable } from './components/ProjectionTable';
 import { AIAdvisor } from './components/AIAdvisor';
+import { Login } from './components/Login';
 import { FinancialState, View, Debt, Income, Expense, NotificationItem, UserProfile } from './types';
 
 // Simple ID generator since we can't add external packages easily
@@ -42,7 +43,6 @@ const App: React.FC = () => {
       const saved = localStorage.getItem('finances_er_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Robust merge to ensure all required arrays exist even if localStorage has old data
         return {
           ...INITIAL_STATE,
           ...parsed,
@@ -61,8 +61,21 @@ const App: React.FC = () => {
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
+  
+  // Auth States
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfile>('Edna');
   const [pushEnabled, setPushEnabled] = useState(false);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem('finances_er_user');
+    if (savedUser) {
+      setCurrentUser(savedUser as UserProfile);
+      // We don't auto-login to ensure they see the nice menu, or you can set true here
+      // setIsLoggedIn(true); 
+    }
+  }, []);
 
   // --- SYNC & PERSISTENCE ---
 
@@ -88,9 +101,8 @@ const App: React.FC = () => {
 
   // --- NOTIFICATIONS SYSTEM ---
 
-  // Request Notification Permissions
   useEffect(() => {
-    if ('Notification' in window && Notification.permission !== 'granted') {
+    if (isLoggedIn && 'Notification' in window && Notification.permission !== 'granted') {
       try {
         Notification.requestPermission().then(permission => {
           setPushEnabled(permission === 'granted');
@@ -101,14 +113,14 @@ const App: React.FC = () => {
     } else if ('Notification' in window && Notification.permission === 'granted') {
       setPushEnabled(true);
     }
-  }, []);
+  }, [isLoggedIn]);
 
   const sendSystemNotification = useCallback((title: string, body: string) => {
     if (pushEnabled && 'Notification' in window && document.visibilityState === 'hidden') {
       try {
         new Notification(title, {
           body,
-          icon: 'https://cdn-icons-png.flaticon.com/512/2933/2933116.png' // Generic money icon
+          icon: 'https://cdn-icons-png.flaticon.com/512/2933/2933116.png'
         });
       } catch(e) { console.error(e); }
     }
@@ -182,7 +194,6 @@ const App: React.FC = () => {
 
             // Bi-weekly (Quincenal)
             if (exp.frequency === 'Bi-weekly') {
-                // Check if today matches dueDay OR dueDay + 15
                 if (exp.dueDay && (currentDay === exp.dueDay || currentDay === exp.dueDay + 15)) {
                     shouldNotify = true;
                     msg = `Quincenal: Hoy corresponde el gasto de ${exp.name}.`;
@@ -211,6 +222,17 @@ const App: React.FC = () => {
 
 
   // --- ACTIONS ---
+
+  const handleLogin = (user: UserProfile) => {
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+    localStorage.setItem('finances_er_user', user);
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    // We keep the currentUser in state so next login is faster, but we change auth state
+  };
 
   const handleAddDebt = (debt: Omit<Debt, 'id'>) => {
     const newDebt = { ...debt, id: generateId() };
@@ -312,6 +334,11 @@ const App: React.FC = () => {
     }
   };
 
+  // --- LOGIN GUARD ---
+  if (!isLoggedIn) {
+    return <Login onLogin={handleLogin} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 flex flex-col">
       <Navbar 
@@ -320,6 +347,7 @@ const App: React.FC = () => {
         currentUser={currentUser}
         onUserChange={setCurrentUser}
         pushEnabled={pushEnabled}
+        onLogout={handleLogout}
       />
 
       <div className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -330,8 +358,8 @@ const App: React.FC = () => {
       
       <footer className="bg-white border-t border-slate-200 mt-auto">
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex justify-between items-center text-xs text-slate-400">
-           <p>© 2024 Finanzas Edna & Ronaldo. Todos los derechos reservados.</p>
-           <p>Versión Web 2.0</p>
+           <p>© 2024 Universo Finanzas E&R. Todos los derechos reservados.</p>
+           <p>Sistema v2.1</p>
         </div>
       </footer>
     </div>
