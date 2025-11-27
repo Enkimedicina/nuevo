@@ -1,21 +1,25 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types';
-import { Lock, ArrowRight, Star } from 'lucide-react';
+import { Lock, ArrowRight, Settings, Save, CheckCircle } from 'lucide-react';
+import { FirebaseConfig } from '../services/firebase';
 
 interface LoginProps {
   onLogin: (user: UserProfile) => void;
+  onSaveCloudConfig?: (config: FirebaseConfig) => void;
 }
 
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC<LoginProps> = ({ onLogin, onSaveCloudConfig }) => {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [showConfig, setShowConfig] = useState(false);
+  
+  // Config state
+  const [firebaseConfig, setFirebaseConfig] = useState('');
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser) return;
-
-    // Simple hardcoded PIN for security demonstration
     if (pin === '2024') {
       onLogin(selectedUser);
     } else {
@@ -24,15 +28,64 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     }
   };
 
+  const handleSaveConfig = () => {
+      try {
+          const config = JSON.parse(firebaseConfig);
+          if (onSaveCloudConfig) {
+              onSaveCloudConfig(config);
+              setShowConfig(false);
+              alert("Configuración guardada. La app intentará conectarse.");
+          }
+      } catch (e) {
+          setError("El formato JSON no es válido. Copia el objeto completo de Firebase.");
+      }
+  };
+
   return (
     <div className="min-h-screen bg-[#0f172a] flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Space Background Effects */}
+      {/* Background Effects */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-900/40 via-[#0f172a] to-[#0f172a]"></div>
       <div className="absolute top-20 left-20 w-1 h-1 bg-white rounded-full animate-pulse"></div>
       <div className="absolute bottom-40 right-40 w-2 h-2 bg-pink-400 rounded-full animate-pulse delay-700"></div>
       <div className="absolute top-1/2 left-1/3 w-1 h-1 bg-purple-400 rounded-full animate-pulse delay-300"></div>
       
+      {/* Config Modal */}
+      {showConfig && (
+          <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-700 p-6 rounded-xl max-w-lg w-full shadow-2xl">
+                  <h3 className="text-white text-lg font-bold mb-4 flex items-center">
+                      <Settings className="w-5 h-5 mr-2 text-brand-500" />
+                      Configuración de Nube (Firebase)
+                  </h3>
+                  <p className="text-slate-400 text-sm mb-4">
+                      Para sincronizar entre celular y PC, pega aquí tu configuración de Firebase (objeto JSON).
+                  </p>
+                  <textarea 
+                    className="w-full h-40 bg-slate-950 border border-slate-800 rounded p-3 text-xs text-green-400 font-mono focus:outline-none focus:border-brand-500"
+                    placeholder='{ "apiKey": "AIza...", "authDomain": "...", ... }'
+                    value={firebaseConfig}
+                    onChange={(e) => setFirebaseConfig(e.target.value)}
+                  />
+                  {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
+                  <div className="flex justify-end space-x-3 mt-4">
+                      <button onClick={() => setShowConfig(false)} className="text-slate-400 hover:text-white text-sm">Cancelar</button>
+                      <button onClick={handleSaveConfig} className="bg-brand-600 text-white px-4 py-2 rounded text-sm font-bold flex items-center hover:bg-brand-700">
+                          <Save className="w-4 h-4 mr-2" /> Guardar
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       <div className="relative z-10 w-full max-w-md">
+        <button 
+            onClick={() => setShowConfig(true)}
+            className="absolute top-0 right-0 p-2 text-slate-600 hover:text-slate-300 transition-colors"
+            title="Configurar Sincronización"
+        >
+            <Settings className="w-5 h-5" />
+        </button>
+
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-900 border border-indigo-500/30 shadow-[0_0_30px_rgba(99,102,241,0.3)] mb-6 group relative">
              <div className="absolute inset-0 rounded-full border border-white/10 animate-[spin_10s_linear_infinite]"></div>

@@ -1,13 +1,13 @@
 import React from 'react';
 import { View, UserProfile } from '../types';
-import { LayoutDashboard, CreditCard, PieChart, Sparkles, CalendarClock, User, Bell, Menu, X, LogOut } from 'lucide-react';
+import { LayoutDashboard, CreditCard, PieChart, Sparkles, CalendarClock, User, Bell, Menu, X, LogOut, Cloud, CloudOff } from 'lucide-react';
 
 interface NavbarProps {
   currentView: View;
   onChangeView: (view: View) => void;
   currentUser: UserProfile;
   onUserChange: (user: UserProfile) => void;
-  pushEnabled: boolean;
+  pushEnabled: boolean; // Re-purposed as "Is Synced" for this view
   onLogout?: () => void;
 }
 
@@ -33,7 +33,6 @@ export const Navbar: React.FC<NavbarProps> = ({
       if (onLogout) {
           onLogout();
       } else {
-          // Fallback if no logout handler provided
           window.location.reload();
       }
   };
@@ -43,32 +42,21 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           
-          {/* LOGO: Universe & Stars of Love */}
+          {/* LOGO */}
           <div className="flex items-center">
             <div 
               className="flex-shrink-0 flex items-center gap-3 cursor-pointer group" 
               onClick={() => onChangeView(View.DASHBOARD)}
             >
-              {/* Custom SVG Logo */}
               <div className="relative w-10 h-10 flex items-center justify-center rounded-full bg-slate-900 border border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.3)] overflow-hidden group-hover:shadow-[0_0_20px_rgba(236,72,153,0.5)] transition-all duration-500">
-                {/* Background Space Gradient */}
                 <div className="absolute inset-0 bg-gradient-to-tr from-slate-900 via-indigo-950 to-purple-900"></div>
-                
-                {/* Tiny Stars */}
                 <div className="absolute top-2 right-2 w-0.5 h-0.5 bg-white rounded-full animate-pulse"></div>
-                <div className="absolute bottom-3 left-2 w-0.5 h-0.5 bg-blue-300 rounded-full animate-pulse delay-75"></div>
-                <div className="absolute top-1 left-4 w-0.5 h-0.5 bg-purple-200 rounded-full animate-pulse delay-150"></div>
-
-                {/* Orbital Ring */}
                 <div className="absolute w-12 h-4 border border-white/20 rounded-[100%] rotate-[-25deg] top-3"></div>
-
-                {/* Heart Planet Core */}
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-pink-500 relative z-10 drop-shadow-[0_0_8px_rgba(236,72,153,0.8)] transform group-hover:scale-110 transition-transform duration-300">
                     <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
                 </svg>
               </div>
 
-              {/* Brand Name */}
               <div className="flex flex-col">
                 <span className="font-bold text-lg tracking-tight leading-none text-transparent bg-clip-text bg-gradient-to-r from-pink-400 via-purple-400 to-indigo-400">
                   Universo
@@ -101,23 +89,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Right Side: User & Notifications */}
+          {/* Right Side */}
           <div className="hidden md:flex items-center space-x-4">
-            {/* Status Indicator */}
-            <div className="flex items-center space-x-2 text-xs text-slate-400 bg-slate-800/50 px-3 py-1 rounded-full border border-slate-700/50">
-               <span className={`w-2 h-2 rounded-full ${pushEnabled ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`} />
-               <span>{pushEnabled ? 'Sincronizado' : 'Local'}</span>
+            {/* Sync Indicator */}
+            <div className={`flex items-center space-x-2 text-xs px-3 py-1 rounded-full border transition-colors ${pushEnabled ? 'bg-green-900/20 text-green-400 border-green-900/50' : 'bg-slate-800 text-slate-400 border-slate-700'}`}>
+               {pushEnabled ? <Cloud className="w-3 h-3" /> : <CloudOff className="w-3 h-3" />}
+               <span>{pushEnabled ? 'En Línea' : 'Local'}</span>
             </div>
 
             <div className="h-6 w-px bg-slate-800 mx-2"></div>
 
             {/* User Selector */}
             <div className="flex items-center space-x-3">
-               <div className="text-right hidden lg:block">
-                  <p className="text-sm font-medium text-slate-200 leading-none">Hola, {currentUser}</p>
-                  <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-wider">Perfil Activo</p>
-               </div>
-               
                <div className="relative group">
                   <button className="flex items-center space-x-2 bg-gradient-to-br from-slate-800 to-slate-900 hover:from-slate-700 hover:to-slate-800 text-white pl-3 pr-2 py-1.5 rounded-full border border-slate-700 transition-all shadow-md">
                       <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-pink-500 to-purple-600 flex items-center justify-center text-xs font-bold">
@@ -125,8 +108,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       <span className="md:hidden lg:inline text-sm font-medium pr-1">{currentUser}</span>
                   </button>
-                  
-                  {/* Invisible Select Overlay for Interaction */}
                   <select 
                     value={currentUser}
                     onChange={(e) => onUserChange(e.target.value as UserProfile)}
@@ -148,8 +129,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Mobile menu button */}
-          <div className="md:hidden flex items-center">
-            <button
+          <div className="md:hidden flex items-center space-x-4">
+             {/* Small Sync Dot for Mobile */}
+             <div className={`w-2 h-2 rounded-full ${pushEnabled ? 'bg-green-500 shadow-lg shadow-green-500/50' : 'bg-slate-600'}`}></div>
+
+             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
               className="inline-flex items-center justify-center p-2 rounded-md text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
             >
@@ -190,7 +174,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
                 <div className="ml-3">
                    <div className="text-base font-medium leading-none text-white">{currentUser}</div>
-                   <div className="text-sm font-medium leading-none text-slate-400 mt-1">Usuario Activo</div>
+                   <div className="text-sm font-medium leading-none text-slate-400 mt-1">
+                       {pushEnabled ? 'Sincronizado' : 'Modo Local'}
+                   </div>
                 </div>
                 <button 
                     onClick={handleLogoutClick}

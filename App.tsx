@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './components/Dashboard';
 import { DebtManager } from './components/DebtManager';
@@ -7,6 +7,7 @@ import { ProjectionTable } from './components/ProjectionTable';
 import { AIAdvisor } from './components/AIAdvisor';
 import { Login } from './components/Login';
 import { FinancialState, View, Debt, Income, Expense, NotificationItem, UserProfile } from './types';
+import { initFirebase, subscribeToData, saveDataToCloud, FirebaseConfig, isFirebaseConfigured } from './services/firebase';
 
 // Simple ID generator since we can't add external packages easily
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -38,78 +39,104 @@ const INITIAL_STATE: FinancialState = {
 };
 
 const App: React.FC = () => {
-  const [data, setData] = useState<FinancialState>(() => {
+  // State Initialization
+  const [data, setData] = useState<FinancialState>(INITIAL_STATE);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
+  
+  // Auth & Sync States
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<UserProfile>('Edna');
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [syncMessage, setSyncMessage] = useState('');
+
+  // Use a ref to prevent saving data that came from the cloud back to the cloud (loop prevention)
+  const isRemoteUpdate = useRef(false);
+
+  // Initialize Data (Local or Cloud)
+  useEffect(() => {
+    // 1. Load User Preference
+    const savedUser = localStorage.getItem('finances_er_user');
+    if (savedUser) setCurrentUser(savedUser as UserProfile);
+
+    // 2. Load Local Data First (Instant render)
     try {
       const saved = localStorage.getItem('finances_er_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
-          ...INITIAL_STATE,
-          ...parsed,
-          debts: Array.isArray(parsed.debts) ? parsed.debts : INITIAL_STATE.debts,
-          expenses: Array.isArray(parsed.expenses) ? parsed.expenses : INITIAL_STATE.expenses,
-          incomes: Array.isArray(parsed.incomes) ? parsed.incomes : INITIAL_STATE.incomes,
-          payments: Array.isArray(parsed.payments) ? parsed.payments : INITIAL_STATE.payments,
-          history: Array.isArray(parsed.history) ? parsed.history : INITIAL_STATE.history
-        };
+        setData({ ...INITIAL_STATE, ...parsed });
       }
-    } catch (e) {
-      console.error("Failed to parse local storage, reverting to default.", e);
-    }
-    return INITIAL_STATE;
-  });
+    } catch (e) { console.error(e); }
+    setIsDataLoaded(true);
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [currentView, setCurrentView] = useState<View>(View.DASHBOARD);
-  
-  // Auth States
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserProfile>('Edna');
-  const [pushEnabled, setPushEnabled] = useState(false);
-
-  // Check for existing session on mount
-  useEffect(() => {
-    const savedUser = localStorage.getItem('finances_er_user');
-    if (savedUser) {
-      setCurrentUser(savedUser as UserProfile);
-      // We don't auto-login to ensure they see the nice menu, or you can set true here
-      // setIsLoggedIn(true); 
-    }
-  }, []);
-
-  // --- SYNC & PERSISTENCE ---
-
-  // Persist data whenever it changes
-  useEffect(() => {
-    localStorage.setItem('finances_er_v1', JSON.stringify(data));
-  }, [data]);
-
-  // Listen for storage changes (Sync across tabs/windows)
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'finances_er_v1' && e.newValue) {
-        try {
-            setData(JSON.parse(e.newValue));
-        } catch(err) {
-            console.error("Sync error", err);
+    // 3. Initialize Firebase if config exists
+    const fbConfigStr = localStorage.getItem('finances_er_firebase_config');
+    if (fbConfigStr) {
+      try {
+        const config = JSON.parse(fbConfigStr);
+        if (initFirebase(config)) {
+            setCloudStatus('connecting');
         }
+      } catch (e) {
+        console.error("Invalid firebase config", e);
       }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
+    }
   }, []);
+
+  // --- SYNC ENGINE ---
+
+  // Connect to Cloud Real-time Stream
+  useEffect(() => {
+    if (cloudStatus === 'connecting' || (cloudStatus === 'connected' && isFirebaseConfigured())) {
+        const unsubscribe = subscribeToData(
+            (newData) => {
+                // We received data from another device
+                isRemoteUpdate.current = true; 
+                setData(prev => {
+                    // Only update if actually different to avoid renders
+                    if (JSON.stringify(prev) !== JSON.stringify(newData)) {
+                        console.log("Cloud update received", new Date().toISOString());
+                        return newData;
+                    }
+                    return prev;
+                });
+                setCloudStatus('connected');
+                // Also save to local storage as backup
+                localStorage.setItem('finances_er_v1', JSON.stringify(newData));
+                setTimeout(() => isRemoteUpdate.current = false, 500);
+            },
+            (err) => {
+                setSyncMessage(err);
+                setCloudStatus('error');
+            }
+        );
+        return () => unsubscribe && unsubscribe();
+    }
+  }, [cloudStatus]);
+
+  // Save changes to Cloud (Debounced) & Local
+  useEffect(() => {
+    if (!isDataLoaded) return;
+
+    // Always save local
+    localStorage.setItem('finances_er_v1', JSON.stringify(data));
+
+    // If cloud is connected and this wasn't a remote update, push to cloud
+    if (cloudStatus === 'connected' && !isRemoteUpdate.current) {
+        const timeoutId = setTimeout(() => {
+            saveDataToCloud(data).catch(console.error);
+        }, 1000); // Debounce saves by 1s
+        return () => clearTimeout(timeoutId);
+    }
+  }, [data, cloudStatus, isDataLoaded]);
 
   // --- NOTIFICATIONS SYSTEM ---
 
   useEffect(() => {
     if (isLoggedIn && 'Notification' in window && Notification.permission !== 'granted') {
-      try {
-        Notification.requestPermission().then(permission => {
-          setPushEnabled(permission === 'granted');
-        }).catch(e => console.log("Notification permission error", e));
-      } catch (e) {
-        console.log("Notifications not supported");
-      }
+      Notification.requestPermission().then(p => setPushEnabled(p === 'granted'));
     } else if ('Notification' in window && Notification.permission === 'granted') {
       setPushEnabled(true);
     }
@@ -117,12 +144,7 @@ const App: React.FC = () => {
 
   const sendSystemNotification = useCallback((title: string, body: string) => {
     if (pushEnabled && 'Notification' in window && document.visibilityState === 'hidden') {
-      try {
-        new Notification(title, {
-          body,
-          icon: 'https://cdn-icons-png.flaticon.com/512/2933/2933116.png'
-        });
-      } catch(e) { console.error(e); }
+      new Notification(title, { body, icon: 'https://cdn-icons-png.flaticon.com/512/2933/2933116.png' });
     }
   }, [pushEnabled]);
 
@@ -149,7 +171,6 @@ const App: React.FC = () => {
         data.debts.forEach(debt => {
             if (debt.currentAmount > 0 && debt.dueDay) {
             const dueDay = debt.dueDay;
-            
             if (currentDay === dueDay) {
                 notes.push({
                 id: `debt-due-${debt.id}`,
@@ -170,34 +191,20 @@ const App: React.FC = () => {
         });
       }
 
-      // 3. Expense Reminders (Fixed Expenses)
+      // 3. Expense Reminders
       if (data.expenses) {
         data.expenses.forEach(exp => {
             let shouldNotify = false;
             let msg = '';
 
-            // Monthly
             if (!exp.frequency || exp.frequency === 'Monthly') {
-                if (exp.dueDay && currentDay === exp.dueDay) {
-                    shouldNotify = true;
-                    msg = `Hoy corresponde pagar/apartar: ${exp.name}.`;
-                }
+                if (exp.dueDay && currentDay === exp.dueDay) { shouldNotify = true; msg = `Hoy corresponde pagar: ${exp.name}.`; }
             }
-            
-            // Weekly
             if (exp.frequency === 'Weekly') {
-                if (exp.dueDay !== undefined && currentDayOfWeek === exp.dueDay) {
-                    shouldNotify = true;
-                    msg = `Semanal: Hoy toca el gasto de ${exp.name}.`;
-                }
+                if (exp.dueDay !== undefined && currentDayOfWeek === exp.dueDay) { shouldNotify = true; msg = `Semanal: Hoy toca el gasto de ${exp.name}.`; }
             }
-
-            // Bi-weekly (Quincenal)
             if (exp.frequency === 'Bi-weekly') {
-                if (exp.dueDay && (currentDay === exp.dueDay || currentDay === exp.dueDay + 15)) {
-                    shouldNotify = true;
-                    msg = `Quincenal: Hoy corresponde el gasto de ${exp.name}.`;
-                }
+                if (exp.dueDay && (currentDay === exp.dueDay || currentDay === exp.dueDay + 15)) { shouldNotify = true; msg = `Quincenal: Hoy corresponde el gasto de ${exp.name}.`; }
             }
 
             if (shouldNotify) {
@@ -229,9 +236,15 @@ const App: React.FC = () => {
     localStorage.setItem('finances_er_user', user);
   };
 
+  const handleCloudConfig = (config: FirebaseConfig) => {
+      localStorage.setItem('finances_er_firebase_config', JSON.stringify(config));
+      if (initFirebase(config)) {
+          setCloudStatus('connecting');
+      }
+  };
+
   const handleLogout = () => {
     setIsLoggedIn(false);
-    // We keep the currentUser in state so next login is faster, but we change auth state
   };
 
   const handleAddDebt = (debt: Omit<Debt, 'id'>) => {
@@ -262,9 +275,7 @@ const App: React.FC = () => {
         }
         return d;
       });
-      
       const newTotalDebt = updatedDebts.reduce((acc, d) => acc + d.currentAmount, 0);
-      
       const newHistory = [...prev.history];
       const lastHist = newHistory[newHistory.length - 1];
       if (lastHist && lastHist.date === date.substring(0, 7)) {
@@ -303,40 +314,17 @@ const App: React.FC = () => {
 
   const renderView = () => {
     switch(currentView) {
-      case View.DASHBOARD:
-        return <Dashboard data={data} notifications={notifications} />;
-      case View.DEBTS:
-        return (
-          <DebtManager 
-            data={data} 
-            onAddDebt={handleAddDebt}
-            onUpdateDebt={handleUpdateDebt}
-            onDeleteDebt={handleDeleteDebt}
-            onMakePayment={handleMakePayment}
-          />
-        );
-      case View.PROJECTION:
-        return <ProjectionTable data={data} />;
-      case View.BUDGET:
-        return (
-          <BudgetManager 
-            data={data}
-            onAddIncome={handleAddIncome}
-            onRemoveIncome={handleRemoveIncome}
-            onAddExpense={handleAddExpense}
-            onRemoveExpense={handleRemoveExpense}
-          />
-        );
-      case View.ADVISOR:
-        return <AIAdvisor data={data} />;
-      default:
-        return <Dashboard data={data} notifications={notifications} />;
+      case View.DASHBOARD: return <Dashboard data={data} notifications={notifications} />;
+      case View.DEBTS: return <DebtManager data={data} onAddDebt={handleAddDebt} onUpdateDebt={handleUpdateDebt} onDeleteDebt={handleDeleteDebt} onMakePayment={handleMakePayment} />;
+      case View.PROJECTION: return <ProjectionTable data={data} />;
+      case View.BUDGET: return <BudgetManager data={data} onAddIncome={handleAddIncome} onRemoveIncome={handleRemoveIncome} onAddExpense={handleAddExpense} onRemoveExpense={handleRemoveExpense} />;
+      case View.ADVISOR: return <AIAdvisor data={data} />;
+      default: return <Dashboard data={data} notifications={notifications} />;
     }
   };
 
-  // --- LOGIN GUARD ---
   if (!isLoggedIn) {
-    return <Login onLogin={handleLogin} />;
+    return <Login onLogin={handleLogin} onSaveCloudConfig={handleCloudConfig} />;
   }
 
   return (
@@ -346,11 +334,17 @@ const App: React.FC = () => {
         onChangeView={setCurrentView} 
         currentUser={currentUser}
         onUserChange={setCurrentUser}
-        pushEnabled={pushEnabled}
+        pushEnabled={cloudStatus === 'connected'}
         onLogout={handleLogout}
       />
 
       <div className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {cloudStatus === 'error' && (
+             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                <strong className="font-bold">Error de Sincronización: </strong>
+                <span className="block sm:inline">{syncMessage}</span>
+             </div>
+        )}
         <main className="animate-fadeIn">
           {renderView()}
         </main>
@@ -358,8 +352,8 @@ const App: React.FC = () => {
       
       <footer className="bg-white border-t border-slate-200 mt-auto">
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex justify-between items-center text-xs text-slate-400">
-           <p>© 2024 Universo Finanzas E&R. Todos los derechos reservados.</p>
-           <p>Sistema v2.1</p>
+           <p>© 2024 Universo Finanzas E&R. {cloudStatus === 'connected' ? '☁️ Sincronizado' : '💾 Modo Local'}</p>
+           <p>Sistema v3.0 (Cloud)</p>
         </div>
       </footer>
     </div>
